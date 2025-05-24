@@ -274,6 +274,8 @@ int main()
     xTaskCreate(vTaskSaida, "TaskSaida", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
     xTaskCreate(vTaskReset, "TaskReset", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
 
+    print_display("Esperando", "Input", "Para iniciar");
+
     vTaskStartScheduler();
     panic_unsupported();
 }
