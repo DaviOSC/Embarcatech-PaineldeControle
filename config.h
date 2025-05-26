@@ -1,3 +1,34 @@
+#include "pico/stdlib.h"
+#include "hardware/i2c.h"
+#include "hardware/gpio.h"
+#include "hardware/pwm.h"
+#include "hardware/clocks.h"
+#include "lib/ssd1306.h"
+#include "FreeRTOS.h"
+#include "task.h"
+#include "semphr.h"
+#include "pico/bootrom.h"
+#include "stdio.h"
+
+#define MAX_CONT 10
+#define LED_PIN_RED 13
+#define LED_PIN_GREEN 11
+#define LED_PIN_BLUE 12
+#define BUZZER_PIN 21
+#define BUTTON_PIN_A 5
+#define BUTTON_PIN_B 6
+#define BUTTON_PIN_J 22
+#define DEBOUNCE_MS 200
+static uint32_t last_button_time = 0;
+
+#define I2C_PORT i2c1
+#define I2C_SDA 14
+#define I2C_SCL 15
+#define ENDERECO 0x3C
+ssd1306_t ssd;
+
+volatile uint16_t usuariosAtivos = 0;
+
 #define BUZZER_FREQUENCY 4000/// Frequência do buzzer em Hz
 
 // Função para emitir um beep com duração especificada

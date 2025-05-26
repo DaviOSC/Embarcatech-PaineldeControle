@@ -1,45 +1,16 @@
-#include "pico/stdlib.h"
-#include "hardware/i2c.h"
-#include "hardware/gpio.h"
-#include "hardware/pwm.h"
-#include "hardware/clocks.h"
-#include "lib/ssd1306.h"
-#include "FreeRTOS.h"
-#include "task.h"
-#include "semphr.h"
-#include "pico/bootrom.h"
-#include "stdio.h"
 #include "config.h"
 
-#define MAX_CONT 8
-#define LED_PIN_RED 13
-#define LED_PIN_GREEN 11
-#define LED_PIN_BLUE 12
-#define BUZZER_PIN 21
-#define BUTTON_PIN_A 5
-#define BUTTON_PIN_B 6
-#define BUTTON_PIN_J 22
+SemaphoreHandle_t xContadorSem; // Semáforo para controlar o número de usuários ativos
+SemaphoreHandle_t xUsuariosMutex; // Mutex para controlar o acesso à variável usuariosAtivos
+SemaphoreHandle_t xResetSem; // Semáforo para o botão de reset
+SemaphoreHandle_t xEntradaEventSem; // Semáforo para eventos de entrada
+SemaphoreHandle_t xSaidaEventSem;// Semáforo para eventos de saída
+SemaphoreHandle_t xDisplayMutex; // Mutex para acesso ao display
 
-#define I2C_PORT i2c1
-#define I2C_SDA 14
-#define I2C_SCL 15
-#define ENDERECO 0x3C
-
-volatile uint16_t usuariosAtivos = 0;
-ssd1306_t ssd;
-SemaphoreHandle_t xContadorSem;
-SemaphoreHandle_t xResetSem;
-SemaphoreHandle_t xDisplayMutex;
-
-SemaphoreHandle_t xEntradaEventSem;
-SemaphoreHandle_t xSaidaEventSem;
-SemaphoreHandle_t xUsuariosMutex;
-
-uint16_t eventosProcessados = 0;
 
 void print_display(const char *linha1, const char *linha2, const char *linha3)
 {
-    xSemaphoreTake(xDisplayMutex, portMAX_DELAY);
+    xSemaphoreTake(xDisplayMutex, portMAX_DELAY); // Bloqueia o acesso ao display
     ssd1306_fill(&ssd, 0);
 
     // Moldura e linhas de organização
@@ -56,7 +27,7 @@ void print_display(const char *linha1, const char *linha2, const char *linha3)
         ssd1306_draw_string(&ssd, linha3, 8, 48);
 
     ssd1306_send_data(&ssd);
-    xSemaphoreGive(xDisplayMutex);
+    xSemaphoreGive(xDisplayMutex); // Libera o acesso ao display
 }
 
 void vTaskEntrada(void *params)
@@ -64,25 +35,25 @@ void vTaskEntrada(void *params)
     char buffer[32];
     while (true)
     {
-        if (xSemaphoreTake(xEntradaEventSem, portMAX_DELAY) == pdTRUE)
+        if (xSemaphoreTake(xEntradaEventSem, portMAX_DELAY) == pdTRUE) // Evento de entrada
         {
-            if (xSemaphoreTake(xContadorSem, 0) == pdTRUE)
-            { // Tenta pegar uma vaga
-                xSemaphoreTake(xUsuariosMutex, portMAX_DELAY);
-                usuariosAtivos++;
-                xSemaphoreGive(xUsuariosMutex);
+            if (xSemaphoreTake(xContadorSem, 0) == pdTRUE)  // Tenta pegar uma vaga
+            {
+                xSemaphoreTake(xUsuariosMutex, portMAX_DELAY); // Bloqueia o acesso à variável usuariosAtivos
+                usuariosAtivos++; // Incrementa o número de usuários ativos
+                xSemaphoreGive(xUsuariosMutex); // Libera o acesso à variável usuariosAtivos
 
-                sprintf(buffer, "Usuarios: %d/%d", usuariosAtivos, MAX_CONT);
+                sprintf(buffer, "Quant: %d/%d", usuariosAtivos, MAX_CONT);
                 print_display(buffer, "Entrada", "Registrada!");
             }
             else
             {
                 beep(BUZZER_PIN, 100);
-                xSemaphoreTake(xUsuariosMutex, portMAX_DELAY);
-                uint16_t temp = usuariosAtivos;
-                xSemaphoreGive(xUsuariosMutex);
+                xSemaphoreTake(xUsuariosMutex, portMAX_DELAY); // Bloqueia o acesso à variável usuariosAtivos
+                uint16_t temp = usuariosAtivos; // Captura o número atual de usuários ativos
+                xSemaphoreGive(xUsuariosMutex); // Libera o acesso à variável usuariosAtivos
 
-                sprintf(buffer, "Usuarios: %d/%d", temp, MAX_CONT);
+                sprintf(buffer, "Quant: %d/%d", temp, MAX_CONT);
                 print_display(buffer, "Limite", "Atingido!");
             }
         }
@@ -93,21 +64,21 @@ void vTaskSaida(void *params)
     char buffer[32];
     while (true)
     {
-        if (xSemaphoreTake(xSaidaEventSem, portMAX_DELAY) == pdTRUE)
+        if (xSemaphoreTake(xSaidaEventSem, portMAX_DELAY) == pdTRUE) // Evento de saída
         {
-            xSemaphoreTake(xUsuariosMutex, portMAX_DELAY);
+            xSemaphoreTake(xUsuariosMutex, portMAX_DELAY); // Bloqueia o acesso à variável usuariosAtivos
             if (usuariosAtivos > 0)
             {
                 usuariosAtivos--;
-                xSemaphoreGive(xUsuariosMutex);
-                xSemaphoreGive(xContadorSem);
-                sprintf(buffer, "Usuarios: %d/%d", usuariosAtivos, MAX_CONT);
+                xSemaphoreGive(xUsuariosMutex); // Libera o acesso à variável usuariosAtivos
+                xSemaphoreGive(xContadorSem); // Libera uma vaga no semáforo de contagem
+                sprintf(buffer, "Quant: %d/%d", usuariosAtivos, MAX_CONT);
                 print_display(buffer, "Saida", "Registrada!");
             }
             else
             {
                 xSemaphoreGive(xUsuariosMutex);
-                sprintf(buffer, "Usuarios: %d/%d", usuariosAtivos, MAX_CONT);
+                sprintf(buffer, "Quant: %d/%d", usuariosAtivos, MAX_CONT);
                 print_display(buffer, "Nenhum usuario", "Para sair!");
             }
         }
@@ -118,22 +89,24 @@ void vTaskReset(void *params)
 {
     while (true)
     {
-        if (xSemaphoreTake(xResetSem, portMAX_DELAY) == pdTRUE)
+        if (xSemaphoreTake(xResetSem, portMAX_DELAY) == pdTRUE) // Evento de reset
         {
             beep(BUZZER_PIN, 100);
             vTaskDelay(pdMS_TO_TICKS(100));
             beep(BUZZER_PIN, 100);
 
-            xSemaphoreTake(xUsuariosMutex, portMAX_DELAY);
+            xSemaphoreTake(xUsuariosMutex, portMAX_DELAY); // Bloqueia o acesso à variável usuariosAtivos
             usuariosAtivos = 0;
-            xSemaphoreGive(xUsuariosMutex);
+            xSemaphoreGive(xUsuariosMutex); // Libera o acesso à variável usuariosAtivos
 
+            // Reseta o semáforo de contagem iterando até o máximo
             for (int i = 0; i < MAX_CONT; i++)
             {
                 xSemaphoreGive(xContadorSem);
             }
+
             char buffer[32];
-            sprintf(buffer, "Usuarios: %d/%d", usuariosAtivos, MAX_CONT);
+            sprintf(buffer, "Quant: %d/%d", usuariosAtivos, MAX_CONT);
             print_display(buffer, "Sistema", "Resetado!");
         }
     }
@@ -150,9 +123,9 @@ void vTaskLed(void *params)
 {
     while (true)
     {
-        xSemaphoreTake(xUsuariosMutex, portMAX_DELAY);
+        xSemaphoreTake(xUsuariosMutex, portMAX_DELAY); // Bloqueia o acesso à variável usuariosAtivos
         uint16_t n = usuariosAtivos;
-        xSemaphoreGive(xUsuariosMutex);
+        xSemaphoreGive(xUsuariosMutex); // Libera o acesso à variável usuariosAtivos
 
         if (n == 0)
         {
@@ -170,7 +143,7 @@ void vTaskLed(void *params)
         {
             set_led_rgb(1, 0, 0);
         }
-        vTaskDelay(pdMS_TO_TICKS(100));
+        vTaskDelay(pdMS_TO_TICKS(100)); // Aguarda 100 ms
     }
 }
 // ISR do botão A (incrementa o semáforo de contagem)
@@ -180,6 +153,7 @@ void gpio_A_callback(uint gpio, uint32_t events)
     xSemaphoreGiveFromISR(xEntradaEventSem, &xHigherPriorityTaskWoken);
     portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 }
+// ISR do botão B (decrementa o semáforo de contagem)
 void gpio_B_callback(uint gpio, uint32_t events)
 {
     BaseType_t xHigherPriorityTaskWoken = pdFALSE;
@@ -195,8 +169,6 @@ void gpio_reset_callback(uint gpio, uint32_t events)
     portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 }
 
-static uint32_t last_button_time = 0;
-#define DEBOUNCE_MS 200
 
 void gpio_irq_handler(uint gpio, uint32_t events)
 {
@@ -259,8 +231,7 @@ int main()
     gpio_set_irq_enabled_with_callback(BUTTON_PIN_B, GPIO_IRQ_EDGE_FALL, true, &gpio_irq_handler);
     gpio_set_irq_enabled_with_callback(BUTTON_PIN_J, GPIO_IRQ_EDGE_FALL, true, &gpio_irq_handler);
 
-    gpio_set_irq_enabled(BUTTON_PIN_B, GPIO_IRQ_EDGE_FALL, true);
-
+    // Cria semáforos e mutexes
     xContadorSem = xSemaphoreCreateCounting(MAX_CONT, MAX_CONT);
     xEntradaEventSem = xSemaphoreCreateBinary();
     xSaidaEventSem = xSemaphoreCreateBinary();
@@ -268,13 +239,14 @@ int main()
     xDisplayMutex = xSemaphoreCreateMutex();
     xUsuariosMutex = xSemaphoreCreateMutex();
 
-    // Cria tarefa
+    // Cria tarefas
     xTaskCreate(vTaskLed, "LedTask", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
     xTaskCreate(vTaskEntrada, "TaskEntrada", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
     xTaskCreate(vTaskSaida, "TaskSaida", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
     xTaskCreate(vTaskReset, "TaskReset", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
 
-    print_display("Esperando", "Input", "Para iniciar");
+    // Mensagem inicial
+    print_display("Pressione", "Qualquer botao", "Para iniciar");
 
     vTaskStartScheduler();
     panic_unsupported();
